@@ -1,9 +1,12 @@
 import tf
 import rospy
 import time
+import os
+import yaml
 from numpy import sqrt
 from math import pi
 from smores_controller import smores_controller
+import rospkg
 from nav_msgs.msg import Path
 from std_msgs.msg import String
 
@@ -19,6 +22,13 @@ class SMORESReconfigurationPlanner:
         self.path = None
         self._repeat_cmd_num = 3
         self.do_reconf = False
+        self.path_dict = {
+                         "To_Prob_tag_1":[],
+                         "To_Prob_tag_2":[],
+                         "From_Prob_tag_1":[],
+                         "From_Prob_tag_2":[]
+                         }
+        self.reconf_path_data_path = ""
 
         self._initialize()
 
@@ -47,11 +57,16 @@ class SMORESReconfigurationPlanner:
         self.tag_module_mapping = {"tag_0": 21, "tag_1": 15, "tag_2": 4}
         self.smores_list = self.tag_module_mapping.values()
 
-        rospy.Subscriber('/smorePath', Path, self._receivePathCallback)
         rospy.Subscriber('/reconf_signal', String, self._reconf_signal_callback)
-        self.reconf_pub = rospy.Publisher("/reconf_request", String, queue_size=10)
+        self.reconf_path_data_path = os.path.join(rospkg.RosPack().get_path("smores_reconfiguration"), "data", "reconf_path.yaml")
+        self.loadReconfPath()
 
         rospy.sleep(0.3)
+
+    def loadReconfPath(self):
+        rospy.loginfo("Loading path file from {}...".format(self.reconf_path_data_path))
+        with open(self.reconf_path_data_path, "r") as pathfile:
+            self.path_dict = yaml.load(pathfile)
 
     def _receivePathCallback(self, path):
         rospy.logdebug("Received a path ...")
@@ -208,27 +223,21 @@ class SMORESReconfigurationPlanner:
             if self._finished_path:
                 self.path = None
                 reconf_data = self.reconf_waitlist[self._current_waitlist_id]
-                msg = String()
-                msg.data = "{}:{}:{}:{}".format(reconf_data["move_m"],reconf_data["move_connect"],
-                                                reconf_data["target_m"],reconf_data["target_connect"])
 
                 rospy.logdebug("Preparing for reconfiguration ...")
                 self._preReconf(self.reconf_waitlist[self._current_waitlist_id])
 
-                rospy.logdebug("Sending a request for path ...")
-                self.reconf_pub.publish(msg)
-
-                while self._finished_path and not rospy.is_shutdown():
-                    rospy.logdebug("Waiting for a path ...")
-                    rate.sleep()
+                rospy.logdebug("Loading reconf path ...")
+                self.path = self.path_dict["To_Prob_" + reconf_data["move_m"]]
+                self._finished_path = False
             else:
                 rospy.logdebug("Start to follow a path ...")
-                for pt_id, pose_stamped in enumerate(self.path.poses):
-                    x = pose_stamped.pose.position.x
-                    y = pose_stamped.pose.position.y
+                for pt_id, pt in enumerate(self.path):
+                    x = pt[0]/100.0
+                    y = pt[1]/100.0
 
                     move_tag = self.reconf_waitlist[self._current_waitlist_id]["move_m"]
-                    if pt_id  == (len(self.path.poses) - 1):
+                    if pt_id  == (len(self.path) - 1):
                         self._preDock(self.reconf_waitlist[self._current_waitlist_id])
                         self._driveToTargetPoint(move_tag, x, y, timeout = 10.0)
                     else:
@@ -251,6 +260,8 @@ class SMORESReconfigurationPlanner:
 
 
         # Stop all modules
+        if self.smores_controller is None:
+            return
         for i in self.smores_list:
             self.smores_controller.stopAllMotors(self.smores_controller.getModuleObjectFromID(i))
 
