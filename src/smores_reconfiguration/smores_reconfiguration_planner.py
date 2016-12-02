@@ -53,7 +53,7 @@ class SMORESReconfigurationPlanner:
                 },
                 ]
         self.up_angle = {21:0*pi/180, 15:10*pi/180, 4:15*pi/180}
-        self.down_angle = {21:0*pi/180, 15:3*pi/180, 4:5*pi/180}
+        self.down_angle = {21:0*pi/180, 15:-5*pi/180, 4:5*pi/180}
         self.tag_module_mapping = {"tag_0": 21, "tag_1": 15, "tag_2": 4}
         self.smores_list = self.tag_module_mapping.values()
 
@@ -81,7 +81,7 @@ class SMORESReconfigurationPlanner:
         rospy.logdebug("Getting position for {!r}".format(tag_id))
         while not rospy.is_shutdown():
             try:
-                return self.tf.lookupTransform('/base_link', tag_id, rospy.Time(0))
+                return self.tf.lookupTransform("tag_0", tag_id, rospy.Time(0))
             except (tf.LookupException, tf.ConnectivityException, tf.ExtrapolationException) as e:
                 print e
 
@@ -123,6 +123,8 @@ class SMORESReconfigurationPlanner:
                 rospy.logdebug("Target point arrived.")
                 arrived = True
 
+        self.smores_controller.stopAllMotors(move_module_id)
+        time.sleep(0.1)
         self.smores_controller.stopAllMotors(move_module_id)
         return arrived, error_code
 
@@ -167,15 +169,11 @@ class SMORESReconfigurationPlanner:
         time.sleep(4)
         target_module_obj.move.send_torque("pan", 0.0)
 
-        # Drop the front wheel for better docking
-        target_module_obj.move.command_position("tilt", self.down_angle[target_module_id], 2)
-        time.sleep(3)
-        target_module_obj.move.send_torque("tilt", 0.0)
-
         # Drive the move module out to avoid collision
         self.smores_controller.driveForward(move_module_obj)
+        time.sleep(0.1)
         self.smores_controller.driveForward(move_module_obj)
-        time.sleep(1.5)
+        time.sleep(2.0)
         self.smores_controller.stopAllMotors(move_module_obj)
         time.sleep(0.1)
 
@@ -183,6 +181,8 @@ class SMORESReconfigurationPlanner:
         move_module_id = self.tag_module_mapping[reconf_data["move_m"]]
         move_module_obj = self.smores_controller.getModuleObjectFromID(move_module_id)
         # Put down the back plate for better docking
+        move_module_obj.move.command_position("tilt", self.down_angle[move_module_id], 2)
+        time.sleep(0.1)
         move_module_obj.move.command_position("tilt", self.down_angle[move_module_id], 2)
         time.sleep(3)
         move_module_obj.move.send_torque("tilt", 0.0)
@@ -237,6 +237,7 @@ class SMORESReconfigurationPlanner:
                     y = pt[1]/100.0
 
                     move_tag = self.reconf_waitlist[self._current_waitlist_id]["move_m"]
+
                     if pt_id  == (len(self.path) - 1):
                         self._preDock(self.reconf_waitlist[self._current_waitlist_id])
                         self._driveToTargetPoint(move_tag, x, y, timeout = 10.0)
