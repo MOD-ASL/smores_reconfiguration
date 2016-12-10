@@ -53,7 +53,8 @@ class SMORESReconfigurationPlanner:
                 },
                 ]
         self.up_angle = {21:0*pi/180, 15:10*pi/180, 4:15*pi/180}
-        self.down_angle = {21:0*pi/180, 15:-5*pi/180, 4:5*pi/180}
+        self.neutral_angle = {21:0*pi/180, 15:0*pi/180, 4:5*pi/180}
+        self.down_angle = {21:0*pi/180, 15:-45*pi/180, 4:-30*pi/180}
         self.tag_module_mapping = {"tag_0": 21, "tag_1": 15, "tag_2": 4}
         self.smores_list = self.tag_module_mapping.values()
 
@@ -67,6 +68,27 @@ class SMORESReconfigurationPlanner:
         rospy.loginfo("Loading path file from {}...".format(self.reconf_path_data_path))
         with open(self.reconf_path_data_path, "r") as pathfile:
             self.path_dict = yaml.load(pathfile)
+
+    def beforeT2PReconf(self):
+        left_m_id = 15
+        right_m_id = 4
+        mid_m_id = 21
+
+        mid_m_obj = self.smores_controller.getModuleObjectFromID(mid_m_id)
+        mid_m_obj.mag.control("bottom","off")
+        time.sleep(0.1)
+
+        left_m_obj = self.smores_controller.getModuleObjectFromID(left_m_id)
+        left_m_obj.move.command_position("tilt", self.neutral_angle[left_m_id], 4)
+        right_m_obj = self.smores_controller.getModuleObjectFromID(right_m_id)
+        right_m_obj.move.command_position("tilt", self.neutral_angle[right_m_id], 4)
+
+        time.sleep(4)
+
+        left_m_obj.move.send_torque("tilt", 0.0)
+        time.sleep(0.1)
+        right_m_obj.move.send_torque("tilt", 0.0)
+        time.sleep(0.1)
 
     def _receivePathCallback(self, path):
         rospy.logdebug("Received a path ...")
@@ -181,9 +203,9 @@ class SMORESReconfigurationPlanner:
         move_module_id = self.tag_module_mapping[reconf_data["move_m"]]
         move_module_obj = self.smores_controller.getModuleObjectFromID(move_module_id)
         # Put down the back plate for better docking
-        move_module_obj.move.command_position("tilt", self.down_angle[move_module_id], 2)
+        move_module_obj.move.command_position("tilt", self.neutral_angle[move_module_id], 2)
         time.sleep(0.1)
-        move_module_obj.move.command_position("tilt", self.down_angle[move_module_id], 2)
+        move_module_obj.move.command_position("tilt", self.neutral_angle[move_module_id], 2)
         time.sleep(3)
         move_module_obj.move.send_torque("tilt", 0.0)
         time.sleep(0.1)
@@ -220,6 +242,9 @@ class SMORESReconfigurationPlanner:
 
             if self.smores_controller is None:
                 self.smores_controller = smores_controller.SMORESController(self.smores_list)
+
+            self.beforeT2PReconf()
+
             if self._finished_path:
                 self.path = None
                 reconf_data = self.reconf_waitlist[self._current_waitlist_id]
