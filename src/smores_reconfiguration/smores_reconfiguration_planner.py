@@ -7,7 +7,6 @@ from numpy import sqrt
 from math import pi
 from smores_controller import smores_controller
 import rospkg
-from nav_msgs.msg import Path
 from std_msgs.msg import String
 
 class SMORESReconfigurationPlanner:
@@ -52,10 +51,10 @@ class SMORESReconfigurationPlanner:
                  "undock_disconnect":"right"
                 },
                 ]
-        self.up_angle = {21:0*pi/180, 15:10*pi/180, 4:15*pi/180}
-        self.neutral_angle = {21:0*pi/180, 15:0*pi/180, 4:5*pi/180}
-        self.down_angle = {21:0*pi/180, 15:-45*pi/180, 4:-30*pi/180}
-        self.tag_module_mapping = {"tag_0": 21, "tag_1": 15, "tag_2": 4}
+        self.up_angle = {21:10*pi/180, 15:10*pi/180, 4:10*pi/180, 1:10*pi/180, 11:10*pi/180, 18:10*pi/180, 3:10*pi/180, 13:10*pi/180}
+        self.neutral_angle = {21:0*pi/180, 15:5*pi/180, 4:-5*pi/180, 1:0*pi/180, 11:-5*pi/180, 18:0*pi/180, 3:0*pi/180, 13:-5*pi/180}
+        self.tag_module_mapping = {"tag_0": 18, "tag_1": 13, "tag_2": 15}
+        #self.tag_module_mapping = {"tag_0": 1, "tag_1": 4, "tag_2": 11}
         self.smores_list = self.tag_module_mapping.values()
 
         rospy.Subscriber('/reconf_signal', String, self._reconf_signal_callback)
@@ -107,15 +106,16 @@ class SMORESReconfigurationPlanner:
             except (tf.LookupException, tf.ConnectivityException, tf.ExtrapolationException) as e:
                 print e
 
-    def _driveToTargetPoint(self, move_tag, pt_x, pt_y, timeout = 10.0, near_enough = 0.01):
+    def _driveToTargetPoint(self, move_tag, pt_x, pt_y, timeout = 15.0, near_enough = 0.01):
 
         arrived = False
         error_code = ""
         start_time = time.time()
         move_module_id = self.tag_module_mapping[move_tag]
+        rate = rospy.Rate(2)
 
         while not arrived:
-
+            rate.sleep()
             if (time.time() - start_time) > timeout:
                 rospy.logwarn("Drive to point timed out.")
                 error_code = "TIMEOUT"
@@ -136,6 +136,7 @@ class SMORESReconfigurationPlanner:
 
             x = pt_x - move_pose[0]
             y = pt_y - move_pose[1]
+            rospy.loginfo("Pose is {} and {}".format(move_pose[0], move_pose[1]))
             theta = tf.transformations.euler_from_quaternion(move_rot, 'rxyz')[2]
 
             [v,w] = self.smores_controller.global2Local(x, y, theta)
@@ -145,6 +146,8 @@ class SMORESReconfigurationPlanner:
                 rospy.logdebug("Target point arrived.")
                 arrived = True
 
+        self.smores_controller.stopAllMotors(move_module_id)
+        time.sleep(0.1)
         self.smores_controller.stopAllMotors(move_module_id)
         time.sleep(0.1)
         self.smores_controller.stopAllMotors(move_module_id)
@@ -181,10 +184,22 @@ class SMORESReconfigurationPlanner:
         # Stop for a bit before drive
         time.sleep(0.5)
 
-        # Lift up the front wheel for better driving
-        move_module_obj.move.command_position("tilt", self.up_angle[move_module_id], 2)
+        # Drop down the front wheel to detach from others
+        for i in xrange(self._repeat_cmd_num):
+            move_module_obj.move.command_position("tilt", -45*pi/180, 3)
+            time.sleep(0.1)
         time.sleep(3)
-        move_module_obj.move.send_torque("tilt", 0.0)
+
+        # Lift up the front wheel for better driving
+        for i in xrange(self._repeat_cmd_num):
+            move_module_obj.move.command_position("tilt", self.up_angle[move_module_id], 2)
+            time.sleep(0.1)
+
+        time.sleep(3)
+
+        for i in xrange(self._repeat_cmd_num):
+            move_module_obj.move.send_torque("tilt", 0.0)
+            time.sleep(0.1)
 
         # Reset the front wheel for better docking
         target_module_obj.move.command_position("pan", 0, 4)
@@ -192,9 +207,9 @@ class SMORESReconfigurationPlanner:
         target_module_obj.move.send_torque("pan", 0.0)
 
         # Drive the move module out to avoid collision
-        self.smores_controller.driveForward(move_module_obj)
-        time.sleep(0.1)
-        self.smores_controller.driveForward(move_module_obj)
+        for i in xrange(self._repeat_cmd_num):
+            self.smores_controller.driveForward(move_module_obj)
+            time.sleep(0.1)
         time.sleep(2.0)
         self.smores_controller.stopAllMotors(move_module_obj)
         time.sleep(0.1)
@@ -202,13 +217,31 @@ class SMORESReconfigurationPlanner:
     def _preDock(self, reconf_data):
         move_module_id = self.tag_module_mapping[reconf_data["move_m"]]
         move_module_obj = self.smores_controller.getModuleObjectFromID(move_module_id)
-        # Put down the back plate for better docking
-        move_module_obj.move.command_position("tilt", self.neutral_angle[move_module_id], 2)
-        time.sleep(0.1)
-        move_module_obj.move.command_position("tilt", self.neutral_angle[move_module_id], 2)
+        move_module_connect = reconf_data["move_connect"]
+        move_module_disconnect = reconf_data["move_disconnect"]
+        target_module_id = self.tag_module_mapping[reconf_data["target_m"]]
+        target_module_obj = self.smores_controller.getModuleObjectFromID(target_module_id)
+        target_module_connect = reconf_data["target_connect"]
+
+        for i in xrange(self._repeat_cmd_num):
+            move_module_obj.move.command_position("tilt", self.neutral_angle[move_module_id], 2)
+            time.sleep(0.1)
         time.sleep(3)
-        move_module_obj.move.send_torque("tilt", 0.0)
-        time.sleep(0.1)
+
+        # Turn off all motor for magnet control
+        for i in xrange(self._repeat_cmd_num):
+            self.smores_controller.stopAllMotors(move_module_obj)
+            time.sleep(0.1)
+            self.smores_controller.stopAllMotors(target_module_obj)
+            time.sleep(0.1)
+
+        # Turn on magnects for new connections
+        for i in xrange(self._repeat_cmd_num):
+            move_module_obj.mag.control(move_module_connect, "on")
+            time.sleep(0.1)
+            target_module_obj.mag.control(target_module_connect, "on")
+            time.sleep(0.1)
+
 
     def _postReconf(self, reconf_data):
         move_module_id = self.tag_module_mapping[reconf_data["move_m"]]
@@ -219,21 +252,44 @@ class SMORESReconfigurationPlanner:
         target_module_obj = self.smores_controller.getModuleObjectFromID(target_module_id)
         target_module_connect = reconf_data["target_connect"]
 
+        # Wiggle the tilt for better docking
+        for i in xrange(self._repeat_cmd_num):
+            self.smores_controller.driveBackward(move_module_obj)
+            time.sleep(0.1)
+        for i in xrange(self._repeat_cmd_num):
+            move_module_obj.move.command_position("tilt", -15*pi/180 + self.neutral_angle[move_module_id], 2)
+            time.sleep(0.1)
+        time.sleep(2)
+        for i in xrange(self._repeat_cmd_num):
+            move_module_obj.move.command_position("tilt", self.neutral_angle[move_module_id], 2)
+            time.sleep(0.1)
+        time.sleep(6)
+
         # Turn off all motor for magnet control
-        self.smores_controller.stopAllMotors(move_module_obj)
-        time.sleep(0.1)
-        self.smores_controller.stopAllMotors(target_module_obj)
+        for i in xrange(self._repeat_cmd_num):
+            self.smores_controller.stopAllMotors(move_module_obj)
+            time.sleep(0.1)
+            self.smores_controller.stopAllMotors(target_module_obj)
+            time.sleep(0.1)
 
         # Turn on magnects for new connections
-        move_module_obj.mag.control(move_module_connect, "on")
-        time.sleep(0.1)
-        target_module_obj.mag.control(target_module_connect, "on")
-        time.sleep(0.1)
+        for i in xrange(self._repeat_cmd_num):
+            move_module_obj.mag.control(move_module_connect, "on")
+            time.sleep(0.1)
+            target_module_obj.mag.control(target_module_connect, "on")
+            time.sleep(0.1)
 
-        time.sleep(0.1)
+    def correctHeading(self, move_tag):
+        try:
+            (move_pose, move_rot) = self.getTagPosition(move_tag)
+        except TypeError as e:
+            rospy.logerr("Cannot find position for {!r}: {}".format(move_tag, e))
+            return
+        theta = tf.transformations.euler_from_quaternion(move_rot, 'rxyz')[2]
+        rospy.loginfo("Head of {} is {}".format(move_tag, theta))
 
     def main(self):
-        rate = rospy.Rate(10)
+        rate = rospy.Rate(2)
         while not rospy.is_shutdown():
             rate.sleep()
             if not self.do_reconf:
@@ -242,8 +298,6 @@ class SMORESReconfigurationPlanner:
 
             if self.smores_controller is None:
                 self.smores_controller = smores_controller.SMORESController(self.smores_list)
-
-            self.beforeT2PReconf()
 
             if self._finished_path:
                 self.path = None
@@ -264,10 +318,14 @@ class SMORESReconfigurationPlanner:
                     move_tag = self.reconf_waitlist[self._current_waitlist_id]["move_m"]
 
                     if pt_id  == (len(self.path) - 1):
+                        # Do a spin
+
                         self._preDock(self.reconf_waitlist[self._current_waitlist_id])
                         self._driveToTargetPoint(move_tag, x, y, timeout = 10.0)
                     else:
                         self._driveToTargetPoint(move_tag, x, y)
+
+                    #raw_input("Arrived at point {},{}".format(x,y))
 
                 rospy.logdebug("Finishing docking ...")
                 self._postReconf(self.reconf_waitlist[self._current_waitlist_id])
@@ -279,9 +337,9 @@ class SMORESReconfigurationPlanner:
             if self._current_waitlist_id == len(self.reconf_waitlist):
                 rospy.logdebug("Reconfiguration Finished!")
                 pub = rospy.Publisher("/reconf_status", String, queue_size=10)
-                for i in xrange(3):
+                for i in xrange(10):
                     pub.publish(String("done"))
-                    rospy.sleep(1)
+                    rospy.sleep(0.1)
                 break
 
 
