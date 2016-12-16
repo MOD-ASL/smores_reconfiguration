@@ -27,19 +27,23 @@ class SMORESReconfigurationPlanner:
                          "From_Prob_tag_1":[],
                          "From_Prob_tag_2":[]
                          }
+        self.reconf_order_data = {}
         self.reconf_path_data_path = ""
+        self._current_reconf_direction=""
 
         self._initialize()
 
     def _initialize(self):
         self.tf = tf.TransformListener()
-        self.reconf_waitlist = [
+        self.reconf_order_data = {
+                "T2P":[
                 {"move_m":"tag_1",
                  "target_m":"tag_0",
                  "undock_m":"tag_0",
                  "target_connect":"top",
                  "move_disconnect":"bottom",
                  "move_connect":"bottom",
+                 "move_heading":0.0,
                  "undock_disconnect":"left"
                 },
                 {"move_m":"tag_2",
@@ -48,12 +52,35 @@ class SMORESReconfigurationPlanner:
                  "target_connect":"top",
                  "move_disconnect":"bottom",
                  "move_connect":"bottom",
+                 "move_heading":0.0,
                  "undock_disconnect":"right"
+                }
+                ],
+                "P2T":[
+                {"move_m":"tag_2",
+                 "target_m":"tag_0",
+                 "undock_m":"tag_1",
+                 "target_connect":"right",
+                 "move_disconnect":"bottom",
+                 "move_connect":"bottom",
+                 "move_heading":-pi/2,
+                 "undock_disconnect":"top"
                 },
+                {"move_m":"tag_1",
+                 "target_m":"tag_0",
+                 "undock_m":"tag_0",
+                 "target_connect":"left",
+                 "move_disconnect":"bottom",
+                 "move_connect":"bottom",
+                 "move_heading":pi/2,
+                 "undock_disconnect":"top"
+                }
                 ]
-        self.up_angle = {21:10*pi/180, 15:10*pi/180, 4:10*pi/180, 1:10*pi/180, 11:10*pi/180, 18:10*pi/180, 3:10*pi/180, 13:10*pi/180}
-        self.neutral_angle = {21:0*pi/180, 15:5*pi/180, 4:-5*pi/180, 1:0*pi/180, 11:-5*pi/180, 18:0*pi/180, 3:0*pi/180, 13:-5*pi/180}
-        self.tag_module_mapping = {"tag_0": 18, "tag_1": 13, "tag_2": 15}
+                }
+
+        self.up_angle = {21:10*pi/180, 15:10*pi/180, 4:10*pi/180, 1:10*pi/180, 11:10*pi/180, 18:10*pi/180, 3:10*pi/180, 13:25*pi/180, 7:10*pi/180}
+        self.neutral_angle = {21:0*pi/180, 15:5*pi/180, 4:-5*pi/180, 1:0*pi/180, 11:-5*pi/180, 18:0*pi/180, 3:0*pi/180, 13:20*pi/180, 7:0*pi/180}
+        self.tag_module_mapping = {"tag_0":18, "tag_1":11, "tag_2":15}
         #self.tag_module_mapping = {"tag_0": 1, "tag_1": 4, "tag_2": 11}
         self.smores_list = self.tag_module_mapping.values()
 
@@ -68,26 +95,6 @@ class SMORESReconfigurationPlanner:
         with open(self.reconf_path_data_path, "r") as pathfile:
             self.path_dict = yaml.load(pathfile)
 
-    def beforeT2PReconf(self):
-        left_m_id = 15
-        right_m_id = 4
-        mid_m_id = 21
-
-        mid_m_obj = self.smores_controller.getModuleObjectFromID(mid_m_id)
-        mid_m_obj.mag.control("bottom","off")
-        time.sleep(0.1)
-
-        left_m_obj = self.smores_controller.getModuleObjectFromID(left_m_id)
-        left_m_obj.move.command_position("tilt", self.neutral_angle[left_m_id], 4)
-        right_m_obj = self.smores_controller.getModuleObjectFromID(right_m_id)
-        right_m_obj.move.command_position("tilt", self.neutral_angle[right_m_id], 4)
-
-        time.sleep(4)
-
-        left_m_obj.move.send_torque("tilt", 0.0)
-        time.sleep(0.1)
-        right_m_obj.move.send_torque("tilt", 0.0)
-        time.sleep(0.1)
 
     def _receivePathCallback(self, path):
         rospy.logdebug("Received a path ...")
@@ -95,8 +102,13 @@ class SMORESReconfigurationPlanner:
         self._finished_path = False
 
     def _reconf_signal_callback(self, data):
-        print "Recieve {}".format(data)
-        self.do_reconf = True
+        data = str(data.data)
+        if data == "P2T" or data == "T2P":
+            self.reconf_waitlist = self.reconf_order_data[data]
+            self._current_reconf_direction = data
+            self.do_reconf = True
+        else:
+            rospy.logwarn("Cannot recognize {}".format(data))
 
     def getTagPosition(self, tag_id):
         rospy.logdebug("Getting position for {!r}".format(tag_id))
@@ -106,7 +118,7 @@ class SMORESReconfigurationPlanner:
             except (tf.LookupException, tf.ConnectivityException, tf.ExtrapolationException) as e:
                 print e
 
-    def _driveToTargetPoint(self, move_tag, pt_x, pt_y, timeout = 15.0, near_enough = 0.01):
+    def _driveToTargetPoint(self, move_tag, pt_x, pt_y, timeout = 30.0, near_enough = 0.01):
 
         arrived = False
         error_code = ""
@@ -202,9 +214,10 @@ class SMORESReconfigurationPlanner:
             time.sleep(0.1)
 
         # Reset the front wheel for better docking
-        target_module_obj.move.command_position("pan", 0, 4)
-        time.sleep(4)
-        target_module_obj.move.send_torque("pan", 0.0)
+        if target_module_connect == "top":
+            target_module_obj.move.command_position("pan", 0, 4)
+            time.sleep(4)
+            target_module_obj.move.send_torque("pan", 0.0)
 
         # Drive the move module out to avoid collision
         for i in xrange(self._repeat_cmd_num):
@@ -222,6 +235,10 @@ class SMORESReconfigurationPlanner:
         target_module_id = self.tag_module_mapping[reconf_data["target_m"]]
         target_module_obj = self.smores_controller.getModuleObjectFromID(target_module_id)
         target_module_connect = reconf_data["target_connect"]
+        move_heading = reconf_data["move_heading"]
+
+        # Correct the heading
+        self.correctHeading(reconf_data["move_m"], move_module_obj, move_heading)
 
         for i in xrange(self._repeat_cmd_num):
             move_module_obj.move.command_position("tilt", self.neutral_angle[move_module_id], 2)
@@ -263,7 +280,7 @@ class SMORESReconfigurationPlanner:
         for i in xrange(self._repeat_cmd_num):
             move_module_obj.move.command_position("tilt", self.neutral_angle[move_module_id], 2)
             time.sleep(0.1)
-        time.sleep(6)
+        time.sleep(3)
 
         # Turn off all motor for magnet control
         for i in xrange(self._repeat_cmd_num):
@@ -279,14 +296,29 @@ class SMORESReconfigurationPlanner:
             target_module_obj.mag.control(target_module_connect, "on")
             time.sleep(0.1)
 
-    def correctHeading(self, move_tag):
+    def getTagOrientation(self, move_tag):
         try:
             (move_pose, move_rot) = self.getTagPosition(move_tag)
         except TypeError as e:
             rospy.logerr("Cannot find position for {!r}: {}".format(move_tag, e))
             return
-        theta = tf.transformations.euler_from_quaternion(move_rot, 'rxyz')[2]
-        rospy.loginfo("Head of {} is {}".format(move_tag, theta))
+        return tf.transformations.euler_from_quaternion(move_rot, 'rxyz')[2]
+
+    def correctHeading(self, move_tag, move_module_obj, target_angle, close_enough=0.2):
+        rospy.loginfo("Correct heading of {}".format(move_tag))
+        angle = 2*pi
+        self.smores_controller.spin(move_module_obj)
+        rospy.sleep(0.1)
+        self.smores_controller.spin(move_module_obj)
+        rate = rospy.Rate(5)
+        while not rospy.is_shutdown() and abs(target_angle - angle)>close_enough:
+            angle = self.getTagOrientation(move_tag)
+            rospy.loginfo("diff is {}".format(abs(target_angle-angle)))
+            rate.sleep()
+        rospy.loginfo("Heading is good!")
+        self.smores_controller.stopAllMotors(move_module_obj)
+        rospy.sleep(0.1)
+        self.smores_controller.stopAllMotors(move_module_obj)
 
     def main(self):
         rate = rospy.Rate(2)
@@ -307,7 +339,7 @@ class SMORESReconfigurationPlanner:
                 self._preReconf(self.reconf_waitlist[self._current_waitlist_id])
 
                 rospy.logdebug("Loading reconf path ...")
-                self.path = self.path_dict["To_Prob_" + reconf_data["move_m"]]
+                self.path = self.path_dict[self._current_reconf_direction + "_" + reconf_data["move_m"]]
                 self._finished_path = False
             else:
                 rospy.logdebug("Start to follow a path ...")
@@ -321,7 +353,7 @@ class SMORESReconfigurationPlanner:
                         # Do a spin
 
                         self._preDock(self.reconf_waitlist[self._current_waitlist_id])
-                        self._driveToTargetPoint(move_tag, x, y, timeout = 10.0)
+                        self._driveToTargetPoint(move_tag, x, y, timeout = 5.0)
                     else:
                         self._driveToTargetPoint(move_tag, x, y)
 
