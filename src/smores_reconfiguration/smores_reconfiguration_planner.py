@@ -116,7 +116,9 @@ class SMORESReconfigurationPlanner:
             try:
                 return self.tf.lookupTransform("tag_0", tag_id, rospy.Time(0))
             except (tf.LookupException, tf.ConnectivityException, tf.ExtrapolationException) as e:
-                print e
+                rospyrospy.logerr(e)
+                return None
+
 
     def _driveToTargetPoint(self, move_tag, pt_x, pt_y, timeout = 30.0, near_enough = 0.01):
 
@@ -301,7 +303,7 @@ class SMORESReconfigurationPlanner:
             (move_pose, move_rot) = self.getTagPosition(move_tag)
         except TypeError as e:
             rospy.logerr("Cannot find position for {!r}: {}".format(move_tag, e))
-            return
+            return None
         return tf.transformations.euler_from_quaternion(move_rot, 'rxyz')[2]
 
     def correctHeading(self, move_tag, move_module_obj, target_angle, close_enough=0.2):
@@ -313,6 +315,8 @@ class SMORESReconfigurationPlanner:
         rate = rospy.Rate(5)
         while not rospy.is_shutdown() and abs(target_angle - angle)>close_enough:
             angle = self.getTagOrientation(move_tag)
+            if angle is None:
+                continue
             rospy.loginfo("diff is {}".format(abs(target_angle-angle)))
             rate.sleep()
         rospy.loginfo("Heading is good!")
