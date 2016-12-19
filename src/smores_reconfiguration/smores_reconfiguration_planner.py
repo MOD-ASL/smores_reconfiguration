@@ -79,9 +79,8 @@ class SMORESReconfigurationPlanner:
                 }
 
         self.up_angle = {21:10*pi/180, 15:10*pi/180, 4:10*pi/180, 1:10*pi/180, 11:10*pi/180, 18:10*pi/180, 3:10*pi/180, 13:25*pi/180, 20:10*pi/180}
-        self.neutral_angle = {21:0*pi/180, 15:5*pi/180, 4:-5*pi/180, 1:0*pi/180, 11:5*pi/180, 18:0*pi/180, 3:0*pi/180, 13:20*pi/180, 20:-10*pi/180}
+        self.neutral_angle = {21:0*pi/180, 15:0*pi/180, 4:-5*pi/180, 1:0*pi/180, 11:5*pi/180, 18:0*pi/180, 3:0*pi/180, 13:20*pi/180, 20:-10*pi/180}
         self.tag_module_mapping = {"tag_0":18, "tag_1":11, "tag_2":15}
-        #self.tag_module_mapping = {"tag_0": 1, "tag_1": 4, "tag_2": 11}
         self.smores_list = self.tag_module_mapping.values()
 
         rospy.Subscriber('/reconf_signal', String, self._reconf_signal_callback)
@@ -251,11 +250,14 @@ class SMORESReconfigurationPlanner:
 
         # Correct the heading
         self.correctHeading(reconf_data["move_m"], move_module_obj, move_heading)
+        rospy.sleep(3.)
+        rospy.loginfo("Check heading again, just in case.")
+        self.correctHeading(reconf_data["move_m"], move_module_obj, move_heading)
 
         for i in xrange(self._repeat_cmd_num):
-            move_module_obj.move.command_position("tilt", self.neutral_angle[move_module_id], 2)
+            move_module_obj.move.command_position("tilt", self.neutral_angle[move_module_id], 3)
             time.sleep(0.1)
-        time.sleep(3)
+        time.sleep(4)
 
         # Turn off all motor for magnet control
         for i in xrange(self._repeat_cmd_num):
@@ -316,18 +318,21 @@ class SMORESReconfigurationPlanner:
             return None
         return tf.transformations.euler_from_quaternion(move_rot, 'rxyz')[2]
 
-    def correctHeading(self, move_tag, move_module_obj, target_angle, close_enough=0.2):
+    def correctHeading(self, move_tag, move_module_obj, target_angle, close_enough=0.1):
         rospy.loginfo("Correct heading of {}".format(move_tag))
         angle = 2*pi
-        self.smores_controller.spin(move_module_obj)
-        rospy.sleep(0.1)
-        self.smores_controller.spin(move_module_obj)
         rate = rospy.Rate(5)
         while not rospy.is_shutdown() and abs(target_angle - angle)>close_enough:
             angle = self.getTagOrientation(move_tag)
             if angle is None:
                 continue
-            rospy.loginfo("diff is {}".format(abs(target_angle-angle)))
+            if target_angle - angle < 0.:
+                # spin ccw
+                self.smores_controller.spin(move_module_obj, direction = "ccw")
+            else:
+                # spin cw
+                self.smores_controller.spin(move_module_obj, direction = "cw")
+            rospy.loginfo("diff is {}".format(target_angle-angle))
             rate.sleep()
         rospy.loginfo("Heading is good!")
         self.smores_controller.stopAllMotors(move_module_obj)
@@ -364,11 +369,15 @@ class SMORESReconfigurationPlanner:
                     move_tag = self.reconf_waitlist[self._current_waitlist_id]["move_m"]
 
                     if pt_id  == (len(self.path) - 1):
-                        # Do a spin
-
                         self._preDock(self.reconf_waitlist[self._current_waitlist_id])
-                        self._driveToTargetPoint(move_tag, x, y, timeout = 5.0)
+                        self._driveToTargetPoint(move_tag, x, y, timeout = 5.0, near_enough = 0.002)
                     else:
+                        self._driveToTargetPoint(move_tag, x, y)
+
+                    if pt_id  == (len(self.path) - 2):
+                        # Do it again
+                        rospy.sleep(3)
+                        rospy.loginfo("Go to the point again, just in case.")
                         self._driveToTargetPoint(move_tag, x, y)
 
                     #raw_input("Arrived at point {},{}".format(x,y))
