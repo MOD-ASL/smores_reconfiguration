@@ -78,8 +78,8 @@ class SMORESReconfigurationPlanner:
                 ]
                 }
 
-        self.up_angle = {21:10*pi/180, 15:10*pi/180, 4:10*pi/180, 1:10*pi/180, 11:10*pi/180, 18:10*pi/180, 3:10*pi/180, 13:25*pi/180, 7:10*pi/180}
-        self.neutral_angle = {21:0*pi/180, 15:5*pi/180, 4:-5*pi/180, 1:0*pi/180, 11:-5*pi/180, 18:0*pi/180, 3:0*pi/180, 13:20*pi/180, 7:0*pi/180}
+        self.up_angle = {21:10*pi/180, 15:10*pi/180, 4:10*pi/180, 1:10*pi/180, 11:10*pi/180, 18:10*pi/180, 3:10*pi/180, 13:25*pi/180, 20:10*pi/180}
+        self.neutral_angle = {21:0*pi/180, 15:5*pi/180, 4:-5*pi/180, 1:0*pi/180, 11:5*pi/180, 18:0*pi/180, 3:0*pi/180, 13:20*pi/180, 20:-10*pi/180}
         self.tag_module_mapping = {"tag_0":18, "tag_1":11, "tag_2":15}
         #self.tag_module_mapping = {"tag_0": 1, "tag_1": 4, "tag_2": 11}
         self.smores_list = self.tag_module_mapping.values()
@@ -208,18 +208,28 @@ class SMORESReconfigurationPlanner:
         for i in xrange(self._repeat_cmd_num):
             move_module_obj.move.command_position("tilt", self.up_angle[move_module_id], 2)
             time.sleep(0.1)
-
         time.sleep(3)
-
         for i in xrange(self._repeat_cmd_num):
             move_module_obj.move.send_torque("tilt", 0.0)
             time.sleep(0.1)
 
-        # Reset the front wheel for better docking
-        if target_module_connect == "top":
-            target_module_obj.move.command_position("pan", 0, 4)
-            time.sleep(4)
-            target_module_obj.move.send_torque("pan", 0.0)
+        # Spin front wheel
+        for i in xrange(self._repeat_cmd_num):
+            move_module_obj.move.command_position("pan", 0, 4)
+            time.sleep(0.05)
+        time.sleep(5)
+        for i in xrange(self._repeat_cmd_num):
+            move_module_obj.move.send_torque("pan", 0.0)
+            time.sleep(0.05)
+
+        # Lift up the front wheel for better driving
+        for i in xrange(self._repeat_cmd_num):
+            move_module_obj.move.command_position("tilt", self.up_angle[move_module_id], 2)
+            time.sleep(0.1)
+        time.sleep(3)
+        for i in xrange(self._repeat_cmd_num):
+            move_module_obj.move.send_torque("tilt", 0.0)
+            time.sleep(0.1)
 
         # Drive the move module out to avoid collision
         for i in xrange(self._repeat_cmd_num):
@@ -282,7 +292,7 @@ class SMORESReconfigurationPlanner:
         for i in xrange(self._repeat_cmd_num):
             move_module_obj.move.command_position("tilt", self.neutral_angle[move_module_id], 2)
             time.sleep(0.1)
-        time.sleep(3)
+        time.sleep(4)
 
         # Turn off all motor for magnet control
         for i in xrange(self._repeat_cmd_num):
