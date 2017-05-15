@@ -78,9 +78,9 @@ class SMORESReconfigurationPlanner:
                 ]
                 }
 
-        self.up_angle = {21:10*pi/180, 15:10*pi/180, 4:10*pi/180, 1:10*pi/180, 11:10*pi/180, 18:10*pi/180, 3:10*pi/180, 13:25*pi/180, 20:10*pi/180}
-        self.neutral_angle = {21:0*pi/180, 15:0*pi/180, 4:-5*pi/180, 1:0*pi/180, 11:5*pi/180, 18:0*pi/180, 3:0*pi/180, 13:20*pi/180, 20:-10*pi/180}
-        self.tag_module_mapping = {"tag_0":18, "tag_1":11, "tag_2":15}
+        self.up_angle = {21:10*pi/180, 15:10*pi/180, 4:10*pi/180, 1:10*pi/180, 11:10*pi/180, 18:10*pi/180, 3:10*pi/180, 13:25*pi/180, 23:10*pi/180}
+        self.neutral_angle = {21:0*pi/180, 15:0*pi/180, 4:-5*pi/180, 1:0*pi/180, 11:5*pi/180, 18:0*pi/180, 3:0*pi/180, 13:20*pi/180, 23:0*pi/180}
+        self.tag_module_mapping = {"tag_0":18, "tag_1":23, "tag_2":15}
         self.smores_list = self.tag_module_mapping.values()
 
         rospy.Subscriber('/reconf_signal', String, self._reconf_signal_callback)
@@ -189,6 +189,8 @@ class SMORESReconfigurationPlanner:
 
         # Disconnect undock module magnets
         for i in xrange(self._repeat_cmd_num):
+            move_module_obj.mag.control("top", "off")
+            time.sleep(0.1)
             move_module_obj.mag.control(move_module_disconnect, "off")
             time.sleep(0.1)
             undock_module_obj.mag.control(undock_module_disconnect, "off")
@@ -249,6 +251,9 @@ class SMORESReconfigurationPlanner:
         move_heading = reconf_data["move_heading"]
 
         # Correct the heading
+        self.correctHeading(reconf_data["move_m"], move_module_obj, move_heading)
+        rospy.sleep(3.)
+        rospy.loginfo("Check heading again, just in case.")
         self.correctHeading(reconf_data["move_m"], move_module_obj, move_heading)
         rospy.sleep(3.)
         rospy.loginfo("Check heading again, just in case.")
@@ -335,9 +340,9 @@ class SMORESReconfigurationPlanner:
             rospy.loginfo("diff is {}".format(target_angle-angle))
             rate.sleep()
         rospy.loginfo("Heading is good!")
-        self.smores_controller.stopAllMotors(move_module_obj)
-        rospy.sleep(0.1)
-        self.smores_controller.stopAllMotors(move_module_obj)
+        for i in xrange(3):
+            self.smores_controller.stopAllMotors(move_module_obj)
+            rospy.sleep(0.01)
 
     def main(self):
         rate = rospy.Rate(2)
